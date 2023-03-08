@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>KMeans | Organise Color</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        margin: 0;
+        padding: 0;
+      }
+      .canvas-wrapper {
+        display: inline-block;
+        white-space: normal;
+      }
+
+      .right-arrow {
+        position: relative;
+        display: inline-block;
+        background-color: #000;
+        width: 100px;
+      }
+
+      .right-arrow::after {
+        content: '\2192';
+        position: absolute;
+        top: -200px;
+        right: 10px;
+        font-size: 5em;
+      }
+
+      .canvas {
+        border: 1px solid #eee;
+        background-color: #efefef;
+      }
+
+      .lr-wrapper {
+        white-space: nowrap;
+      }
+    </style>
+  </head>
+  <body>
+    <main
+      id="main"
+      class="p-8">
+      <h1 class="">KMeans On Colors</h1>
+      <div class="controls">
+        <button id="btnStart">Start</button>
+        <button id="btnRun">Run KMeans</button>
+      </div>
+
+      <div class="lr-wrapper">
+        <div class="canvas-wrapper">
+          <canvas
+            id="inputColors"
+            class="left canvas"
+            width="300"
+            height="300">
+          </canvas>
+        </div>
+
+        <div class="right-arrow"></div>
+
+        <div class="canvas-wrapper">
+          <canvas
+            id="outputColors"
+            class="right canvas"
+            width="300"
+            height="300">
+          </canvas>
+        </div>
+      </div>
+    </main>
+
+    <script type="text/javascript">
+      const MAX_COLOR_VALUE = 255
+      const MIN_COLOR_VALUE = 64
+
+      // Controls
+      let startBtn
+
+      /**
+       * Shuffles an array of colors.
+       *
+       * @param {Array<[number, number, number]>} colors
+       * @returns {Array<[number, number, number]>} shuffled array of colors
+       */
+      function shuffleColors(colors) {
+        for (let i = colors.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1))
+          ;[colors[i], colors[j]] = [colors[j], colors[i]]
+        }
+        return colors
+      }
+
+      /**
+       * Generates a random integer between min and max (inclusive).
+       * @param {number} min
+       * @param {number} max
+       * @returns {number} random integer between min and max (inclusive)
+       */
+      function getRandomInt(min, max) {
+        return Math.floor(Math.random() * (max - min + 1)) + min
+      }
+
+      /**
+       * Generates a random RGB color tuple with each value between 128 and 255 (inclusive).
+       * @returns {[number, number, number]} random RGB color tuple
+       */
+      function generateRandomColor() {
+        const r = getRandomInt(MIN_COLOR_VALUE, MAX_COLOR_VALUE)
+        const g = getRandomInt(MIN_COLOR_VALUE, MAX_COLOR_VALUE)
+        const b = getRandomInt(MIN_COLOR_VALUE, MAX_COLOR_VALUE)
+        return [r, g, b]
+      }
+
+      /**
+       * Generates an array of n random RGB colors of the specified color class.
+       * @param {number} n number of colors to generate
+       * @param {'REDISH'|'GREENISH'|'BLUEISH'} colorClass color class of the generated colors
+       * @returns {Array<[number, number, number]>} array of n random RGB colors of the specified color class
+       */
+      function generateRandomColors(n, colorClass) {
+        const colors = []
+        const colorDiff = (MAX_COLOR_VALUE - MIN_COLOR_VALUE) >> 3
+        for (let i = 0; i < n; i++) {
+          const color = generateRandomColor()
+          switch (colorClass) {
+            case 'REDISH':
+              color[1] = getRandomInt(0, colorDiff) // reduce green component
+              color[2] = getRandomInt(0, colorDiff) // reduce blue component
+              break
+            case 'GREENISH':
+              color[0] = getRandomInt(0, colorDiff) // reduce red component
+              color[2] = getRandomInt(0, colorDiff) // reduce blue component
+              break
+            case 'BLUEISH':
+              color[0] = getRandomInt(0, colorDiff) // reduce red component
+              color[1] = getRandomInt(0, colorDiff) // reduce green component
+              break
+          }
+          colors.push(color)
+        }
+        return colors
+      }
+
+      // Canvas
+      const inputCtx = document.querySelector('#inputColors').getContext('2d')
+      const outputCtx = document.querySelector('#outputColors').getContext('2d')
+
+      /**
+       * Register event lister on the target.
+       *
+       * @param {string} selector target's selector
+       * @param {string} event event name
+       * @param {(): void} event handler
+       */
+      function addEventListener$(selector, event, handler) {
+        document.addEventListener(event, (evt) => {
+          console.log(evt)
+          if (evt.target.closest(selector)) {
+            handler()
+          }
+        })
+      }
+
+      /**
+       * Run KMeans online
+       */
+      async function runKMeans() {
+        const redishColors = generateRandomColors(600, 'REDISH')
+        const greenishColors = generateRandomColors(600, 'GREENISH')
+        const blueishColors = generateRandomColors(600, 'BLUEISH')
+        const colors = shuffleColors([
+          ...redishColors,
+          ...greenishColors,
+          ...blueishColors
+        ])
+
+        // Convert dataset to a nice format understandable by the KMeans API
+        const body = {
+          meta: {
+            populationSize: 10,
+            numGenerations: 10,
+            kMin: 2,
+            kMax: 3
+          },
+          payload: colors.map(([red, green, blue]) => ({ red, green, blue })),
+          features: ['red', 'green', 'blue']
+        }
+
+        animateColors(inputCtx, colors)
+
+        try {
+          const response = await fetch('http://localhost:3030/clusterService', {
+            method: 'POST',
+            body: JSON.stringify(body),
+            headers: { 'Content-Type': 'application/json' }
+          })
+
+          const json = await response.json()
+
+          // Convert clustuers in to an arranged array
+          const outputColors = json.clusters.flatMap((cluster) =>
+            cluster.map(({ red, green, blue }) => [red, green, blue])
+          )
+
+          console.log(outputColors)
+
+          animateColors(outputCtx, outputColors)
+        } catch (err) {
+          console.error(err)
+        }
+      }
+
+      /**
+       * Animate colors
+       */
+      function animateColors(ctx, colors) {
+        let i = 0
+        let j = 0
+        let k = 0
+        let animFrame
+        const animate = () => {
+          const color = colors[k++]
+          console.log({ i, j, k })
+          ctx.beginPath()
+          ctx.fillStyle = `rgb(${color.join(',')})`
+          ctx.fillRect(10 * j, 10 * i, 10, 10)
+          ctx.fill()
+          ctx.closePath()
+          j++
+          k++
+          if (j >= 30) {
+            i++
+            j = 0
+            if (i >= 30) {
+              cancelAnimationFrame(animFrame)
+              return false
+            }
+          }
+          if (i < 30) {
+            animFrame = requestAnimationFrame(() => animate())
+          }
+          return true
+        }
+        return animate()
+      }
+
+      /**
+       * Handle window#onlod event
+       */
+      function onLoad() {
+        // On btnStart click
+        addEventListener$('#btnStart', 'click', runKMeans)
+      }
+
+      window.onload = onLoad
+    </script>
+  </body>
+</html>
